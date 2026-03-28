@@ -39,14 +39,19 @@ export const sphereControlContent = {
   },
 
   hero: {
+    /** Imagen ancla — Tierra real, área oscura para tipografía */
+    imageSrc:
+      "https://images.unsplash.com/photo-1614730321146-b6fa6a46bcb4?auto=format&fit=crop&w=2400&q=82",
+    imageAlt: "La Tierra vista desde el espacio, nubes y océano bajo luz tenue.",
+    eyebrow: "Vitrina técnica en el navegador",
     /** ACTUALIZA TU INFO AQUÍ */
     headlinePrefix: "Controla la esfera con",
     headlineAccent: "tus manos",
     headlineSuffix: "y tu cámara.",
     subtitle:
-      "Una demo técnica que combina MediaPipe, detección de manos en el navegador y Three.js. Ideal para quienes quieren ver el flujo completo antes de entrar al sandbox interactivo.",
+      "MediaPipe, WebGL y una esfera que responde al gesto. Sin instalar nada: permiso de cámara y listo.",
     primaryCta: "Abrir experiencia interactiva",
-    secondaryCta: "Ver qué incluye",
+    secondaryCta: "Ver el detalle",
     secondaryHref: "#valor",
   },
 
@@ -55,16 +60,16 @@ export const sphereControlContent = {
     title: "De la gestualidad al producto",
     /** ACTUALIZA TU INFO AQUÍ */
     paragraphs: [
-      "Sphere Control es una vitrina ligera: aquí entiendes al instante qué hace la herramienta (separar o juntar las manos para escalar una esfera en tiempo real) y por qué importa para prototipos, instalaciones o UX sin contacto.",
-      "Está pensado para desarrolladores, makers y curiosos de la visión por computadora que prefieren probar antes de leer un README largo. El flujo es simple: permisos de cámara, modelo en el dispositivo y WebGL para la escena 3D.",
+      "Una demo que encaja en charlas y portfolios: manos frente a la webcam, landmarks en tiempo real y una Tierra 3D que escala y gira con el gesto. Pensada para prototipos, instalaciones y UX sin contacto.",
+      "Para quien prefiere ver el flujo antes del README: cámara en el navegador, modelo on-device y stack que reconoces (Next.js, Tasks Vision, R3F).",
     ],
   },
 
   valueGrid: {
     id: "valor",
-    title: "Lo que ves en la demo",
+    title: "Qué incluye",
     subtitle:
-      "Todo ocurre en el navegador: sin instalar apps, con enfoque en latencia y claridad visual.",
+      "Un recorrido breve. Sin tarjetas: solo lo que importa.",
     items: [
       {
         icon: "camera" as const,

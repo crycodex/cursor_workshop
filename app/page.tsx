@@ -8,8 +8,8 @@ export default function HomePage() {
   return (
     <div className="min-h-dvh bg-zinc-50 text-zinc-900 antialiased">
       <SphereHeader />
+      <SphereHero />
       <main>
-        <SphereHero />
         <SphereAbout />
         <SphereValueGrid />
       </main>
