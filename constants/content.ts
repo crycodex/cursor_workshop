@@ -172,6 +172,6 @@ export const manosPageContent = {
   pageTitle: "Esfera con tus manos",
   titleGradientPart: "manos",
   subtitle:
-    "Una o dos manos: con dos, sepáralas o júntalas; con una, abre el pinch o la palma. La esfera usa textura de la Tierra y el panel muestra solo los puntos trackeados.",
+    "Una o dos manos: escala al separar o juntar, y gira la Tierra rotando la palma o la muñeca. Textura del planeta y panel solo con puntos trackeados.",
   stackPills: ["Next.js", "MediaPipe Tasks", "Three.js · R3F"] as const,
 } as const;

@@ -14,6 +14,10 @@ import type { Mesh } from "three";
 import * as THREE from "three";
 import { computeSpreadFromLandmarks } from "@/lib/hand-spread";
 import { lerp } from "@/lib/hand-distance";
+import {
+  computeMeanHandOrientation,
+  integrateHandGlobeRotation,
+} from "@/lib/hand-rotation";
 
 const MEDIAPIPE_TASKS_VERSION = "0.10.34";
 const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_TASKS_VERSION}/wasm`;
@@ -30,6 +34,12 @@ const SINGLE_HAND_DECAY = 0.045;
 const SMOOTH_TO_TARGET = 0.14;
 const SPHERE_SCALE_MIN = 0.42;
 const SPHERE_SCALE_RANGE = 1.38;
+
+const HAND_ROT_GAIN_Y = 2.35;
+const HAND_ROT_GAIN_X = 1.55;
+const HAND_PITCH_CLAMP = 0.72;
+const IDLE_GLOBE_YAW_SPEED = 0.12;
+const NO_HAND_PITCH_LERP = 0.09;
 
 const HAND_POINT_RADIUS_PX = 4;
 const HAND_COLORS = ["rgba(167, 139, 250, 0.95)", "rgba(34, 211, 238, 0.95)"];
@@ -97,8 +107,10 @@ function syncCanvasSize(canvas: HTMLCanvasElement, container: HTMLElement): void
 
 function EarthSphereMesh({
   targetSpreadRef,
+  globeRotationRef,
 }: {
   targetSpreadRef: React.MutableRefObject<number>;
+  globeRotationRef: React.MutableRefObject<{ x: number; y: number }>;
 }) {
   const meshRef = useRef<Mesh>(null);
   const smoothedRef = useRef(DEFAULT_SPREAD);
@@ -108,14 +120,15 @@ function EarthSphereMesh({
     loaded.anisotropy = 4;
   });
 
-  useFrame((_, delta) => {
+  useFrame(() => {
     const target = targetSpreadRef.current;
     smoothedRef.current = lerp(smoothedRef.current, target, SMOOTH_TO_TARGET);
     const s = smoothedRef.current;
     const scale = SPHERE_SCALE_MIN + s * SPHERE_SCALE_RANGE;
     if (meshRef.current) {
       meshRef.current.scale.setScalar(scale);
-      meshRef.current.rotation.y += delta * 0.12;
+      meshRef.current.rotation.y = globeRotationRef.current.y;
+      meshRef.current.rotation.x = globeRotationRef.current.x;
     }
   });
 
@@ -133,19 +146,22 @@ function EarthSphereMesh({
 
 function EarthSphereFallback({
   targetSpreadRef,
+  globeRotationRef,
 }: {
   targetSpreadRef: React.MutableRefObject<number>;
+  globeRotationRef: React.MutableRefObject<{ x: number; y: number }>;
 }) {
   const meshRef = useRef<Mesh>(null);
   const smoothedRef = useRef(DEFAULT_SPREAD);
-  useFrame((_, delta) => {
+  useFrame(() => {
     const target = targetSpreadRef.current;
     smoothedRef.current = lerp(smoothedRef.current, target, SMOOTH_TO_TARGET);
     const s = smoothedRef.current;
     const scale = SPHERE_SCALE_MIN + s * SPHERE_SCALE_RANGE;
     if (meshRef.current) {
       meshRef.current.scale.setScalar(scale);
-      meshRef.current.rotation.y += delta * 0.12;
+      meshRef.current.rotation.y = globeRotationRef.current.y;
+      meshRef.current.rotation.x = globeRotationRef.current.x;
     }
   });
   return (
@@ -158,14 +174,24 @@ function EarthSphereFallback({
 
 function EarthSphereWithSuspense({
   targetSpreadRef,
+  globeRotationRef,
 }: {
   targetSpreadRef: React.MutableRefObject<number>;
+  globeRotationRef: React.MutableRefObject<{ x: number; y: number }>;
 }) {
   return (
     <Suspense
-      fallback={<EarthSphereFallback targetSpreadRef={targetSpreadRef} />}
+      fallback={
+        <EarthSphereFallback
+          targetSpreadRef={targetSpreadRef}
+          globeRotationRef={globeRotationRef}
+        />
+      }
     >
-      <EarthSphereMesh targetSpreadRef={targetSpreadRef} />
+      <EarthSphereMesh
+        targetSpreadRef={targetSpreadRef}
+        globeRotationRef={globeRotationRef}
+      />
     </Suspense>
   );
 }
@@ -211,7 +237,7 @@ function statusMessage(phase: ExperiencePhase, errorText: string): string {
     case "loading":
       return "Solicitando acceso a la cámara y cargando el modelo…";
     case "ready":
-      return "Una o dos manos: con dos, separa las manos para crecer; con una, abre el pinch o la palma. La vista muestra solo los puntos trackeados.";
+      return "Una o dos manos: escala separando o juntando; rota las manos (palma/muñeca) para girar la Tierra. Sin manos, la esfera sigue un giro lento. La vista es solo puntos.";
     case "error":
       return errorText || "No se pudo iniciar la experiencia.";
     default: {
@@ -250,6 +276,12 @@ export function HandSphereExperience() {
   const landmarkerRef = useRef<HandLandmarkerRunning | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const targetSpreadRef = useRef(DEFAULT_SPREAD);
+  const globeRotationAccumRef = useRef({ x: 0, y: 0 });
+  const lastHandOrientationRef = useRef<{
+    yaw: number;
+    pitch: number;
+  } | null>(null);
+  const lastFrameTimeRef = useRef(0);
   const mountedRef = useRef(true);
   const [phase, setPhase] = useState<ExperiencePhase>("idle");
   const [errorText, setErrorText] = useState("");
@@ -293,6 +325,9 @@ export function HandSphereExperience() {
     const requestId = ++handStartRequestId;
     setErrorText("");
     targetSpreadRef.current = DEFAULT_SPREAD;
+    globeRotationAccumRef.current = { x: 0, y: 0 };
+    lastHandOrientationRef.current = null;
+    lastFrameTimeRef.current = 0;
     if (typeof window !== "undefined" && !window.isSecureContext) {
       if (mountedRef.current) {
         setPhase("error");
@@ -461,8 +496,15 @@ export function HandSphereExperience() {
       if (cancelled) {
         return;
       }
+      const nowMs = performance.now();
+      const dt =
+        lastFrameTimeRef.current > 0
+          ? Math.min(0.12, (nowMs - lastFrameTimeRef.current) / 1000)
+          : 0;
+      lastFrameTimeRef.current = nowMs;
+
       if (video.readyState >= 2) {
-        const result = landmarker.detectForVideo(video, performance.now());
+        const result = landmarker.detectForVideo(video, nowMs);
         const { landmarks } = result;
         syncCanvasSize(canvas, host);
         drawLandmarksOnCanvas(canvas, landmarks, true);
@@ -474,6 +516,26 @@ export function HandSphereExperience() {
             targetSpreadRef.current,
             DEFAULT_SPREAD,
             SINGLE_HAND_DECAY,
+          );
+        }
+
+        const orientation = computeMeanHandOrientation(landmarks);
+        if (orientation !== null) {
+          lastHandOrientationRef.current = integrateHandGlobeRotation(
+            orientation,
+            lastHandOrientationRef.current,
+            globeRotationAccumRef.current,
+            HAND_ROT_GAIN_Y,
+            HAND_ROT_GAIN_X,
+            HAND_PITCH_CLAMP,
+          );
+        } else {
+          lastHandOrientationRef.current = null;
+          globeRotationAccumRef.current.y += dt * IDLE_GLOBE_YAW_SPEED;
+          globeRotationAccumRef.current.x = lerp(
+            globeRotationAccumRef.current.x,
+            0,
+            NO_HAND_PITCH_LERP,
           );
         }
       }
@@ -513,7 +575,10 @@ export function HandSphereExperience() {
             <ambientLight intensity={0.6} />
             <directionalLight position={[5, 8, 6]} intensity={1.15} />
             <directionalLight position={[-4, -2, -2]} intensity={0.35} />
-            <EarthSphereWithSuspense targetSpreadRef={targetSpreadRef} />
+            <EarthSphereWithSuspense
+              targetSpreadRef={targetSpreadRef}
+              globeRotationRef={globeRotationAccumRef}
+            />
           </Canvas>
         ) : (
           <div className="flex h-full min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-zinc-950 px-4 text-center">
