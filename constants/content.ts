@@ -130,8 +130,8 @@ export const sphereControlContent = {
 
 /**
  * ─────────────────────────────────────────────────────────────────────────────
- * PÁGINA PRINCIPAL (/) — taller + demo Sphere Control
- * ACTUALIZA TU INFO AQUÍ
+ * VISTA /taller — Cursor Quito + bloque demo / features (tema oscuro)
+ * La landing global de producto es /. ACTUALIZA TU INFO AQUÍ
  * ─────────────────────────────────────────────────────────────────────────────
  */
 export const homePageContent = {
@@ -140,7 +140,7 @@ export const homePageContent = {
     links: [
       { label: "Features", href: "#features" },
       { label: "Demo en vivo", href: "/manos" },
-      { label: "Sphere Control", href: "/sphere-control" },
+      { label: "Inicio Sphere Control", href: "/" },
     ],
   },
   workshop: {
@@ -155,7 +155,7 @@ export const homePageContent = {
     description:
       "MediaPipe Hand Landmarker en tu navegador, señal suavizada y escena Three.js (React Three Fiber). Separa o junta las manos para escalar la esfera en tiempo real.",
     primaryCta: { label: "Abrir demo de manos", href: "/manos" },
-    secondaryCta: { label: "Landing del producto", href: "/sphere-control" },
+    secondaryCta: { label: "Inicio Sphere Control", href: "/" },
   },
   featuresSection: {
     id: "features",

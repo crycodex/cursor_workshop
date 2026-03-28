@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
-import { Outfit, Syne } from "next/font/google";
+import { Inter, Outfit, Syne } from "next/font/google";
+import { sphereControlContent } from "@/constants/content";
 import "./globals.css";
+
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+  display: "swap",
+});
 
 const outfit = Outfit({
   variable: "--font-outfit",
@@ -16,11 +23,12 @@ const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL ??
   (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
 
+const { meta } = sphereControlContent;
+
 export const metadata: Metadata = {
   ...(siteUrl ? { metadataBase: new URL(siteUrl) } : {}),
-  title: "Cursor Workshop Quito",
-  description:
-    "Taller práctico en Quito: aprende Cursor, crea y publica tu landing page. Presentado por Cursor Community.",
+  title: meta.title,
+  description: meta.description,
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
@@ -38,7 +46,7 @@ export default function RootLayout({
   return (
     <html
       lang="es"
-      className={`${outfit.variable} ${syne.variable} h-full antialiased`}
+      className={`${inter.variable} ${outfit.variable} ${syne.variable} h-full antialiased`}
     >
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />

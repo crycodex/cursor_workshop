@@ -30,7 +30,7 @@ export default function ManosPage() {
             ← Inicio
           </Link>
           <Link
-            href="/sphere-control"
+            href="/"
             className="text-xs font-medium text-violet-400/90 transition hover:text-violet-300 sm:text-sm"
           >
             Sphere Control
