@@ -25,7 +25,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .motion-hero-media,
   .motion-hero-content,
-  .motion-hero-cta {
+  .motion-hero-cta,
+  .motion-hero-actions {
     animation: none !important;
   }
 }
@@ -73,4 +74,8 @@ body {
 
 .motion-hero-cta {
   animation: hero-line-in 0.7s ease-out 0.35s both;
+}
+
+.motion-hero-actions {
+  animation: hero-line-in 0.7s ease-out 0.48s both;
 }
