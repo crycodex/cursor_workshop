@@ -1,24 +1,29 @@
 "use client";
 
 import { Canvas, useFrame } from "@react-three/fiber";
+import { useTexture } from "@react-three/drei";
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Mesh } from "three";
-import { distance2d, lerp, normalizeDistance } from "@/lib/hand-distance";
-
-/** MediaPipe hand landmark index: middle finger MCP (stable for inter-hand distance). */
-const MIDDLE_FINGER_MCP = 9;
+import * as THREE from "three";
+import { computeSpreadFromLandmarks } from "@/lib/hand-spread";
+import { lerp } from "@/lib/hand-distance";
 
 const MEDIAPIPE_TASKS_VERSION = "0.10.34";
 const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_TASKS_VERSION}/wasm`;
 const HAND_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task";
 
-/** Normalized distance between middle MCPs; tweak for sensitivity. */
-const MIN_HAND_SPAN = 0.08;
-const MAX_HAND_SPAN = 0.78;
+/** Textura visible Earth (three.js examples). */
+const EARTH_TEXTURE_URL =
+  "https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg";
 
-/** When fewer than two hands are visible, ease `targetSpread` toward this neutral value. */
 const DEFAULT_SPREAD = 0.5;
 const SINGLE_HAND_DECAY = 0.045;
 
@@ -26,11 +31,9 @@ const SMOOTH_TO_TARGET = 0.14;
 const SPHERE_SCALE_MIN = 0.42;
 const SPHERE_SCALE_RANGE = 1.38;
 
-/**
- * Supersedes previous in-flight `startExperience` when the user clicks again.
- * Not bumped on effect cleanup — that broke camera access under React Strict Mode
- * (fake unmount invalidated the session before getUserMedia ran).
- */
+const HAND_POINT_RADIUS_PX = 4;
+const HAND_COLORS = ["rgba(167, 139, 250, 0.95)", "rgba(34, 211, 238, 0.95)"];
+
 let handStartRequestId = 0;
 
 type HandLandmarkerRunning = Awaited<
@@ -39,7 +42,6 @@ type HandLandmarkerRunning = Awaited<
 
 type ExperiencePhase = "idle" | "loading" | "ready" | "error";
 
-/** MediaPipe close() can throw during WASM teardown (e.g. React Strict Mode) or double-close. */
 function safeCloseLandmarker(
   landmarker: HandLandmarkerRunning | null | undefined,
 ): void {
@@ -49,35 +51,122 @@ function safeCloseLandmarker(
   try {
     landmarker.close();
   } catch {
-    // Ignore: already closed or native runtime race.
+    // Ignore teardown races.
   }
 }
 
-function SphereScene({
+type LmPoint = { readonly x: number; readonly y: number };
+
+function drawLandmarksOnCanvas(
+  canvas: HTMLCanvasElement,
+  landmarks: ReadonlyArray<ReadonlyArray<LmPoint>>,
+  mirrorX: boolean,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.fillStyle = "#030712";
+  ctx.fillRect(0, 0, w, h);
+  for (let hIdx = 0; hIdx < landmarks.length; hIdx += 1) {
+    const hand = landmarks[hIdx];
+    ctx.fillStyle = HAND_COLORS[hIdx % HAND_COLORS.length];
+    for (const lm of hand) {
+      const nx = mirrorX ? 1 - lm.x : lm.x;
+      const px = nx * w;
+      const py = lm.y * h;
+      ctx.beginPath();
+      ctx.arc(px, py, HAND_POINT_RADIUS_PX, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function syncCanvasSize(canvas: HTMLCanvasElement, container: HTMLElement): void {
+  const dpr = Math.min(window.devicePixelRatio ?? 1, 2);
+  const rect = container.getBoundingClientRect();
+  const cw = Math.max(1, Math.floor(rect.width * dpr));
+  const ch = Math.max(1, Math.floor(rect.height * dpr));
+  if (canvas.width !== cw || canvas.height !== ch) {
+    canvas.width = cw;
+    canvas.height = ch;
+  }
+}
+
+function EarthSphereMesh({
   targetSpreadRef,
 }: {
   targetSpreadRef: React.MutableRefObject<number>;
 }) {
   const meshRef = useRef<Mesh>(null);
   const smoothedRef = useRef(DEFAULT_SPREAD);
-  useFrame(() => {
+  const texture = useTexture(EARTH_TEXTURE_URL, (loaded) => {
+    /* Three.js textures are configured in-place; Drei loader callback runs once. */
+    loaded.colorSpace = THREE.SRGBColorSpace;
+    loaded.anisotropy = 4;
+  });
+
+  useFrame((_, delta) => {
     const target = targetSpreadRef.current;
     smoothedRef.current = lerp(smoothedRef.current, target, SMOOTH_TO_TARGET);
     const s = smoothedRef.current;
     const scale = SPHERE_SCALE_MIN + s * SPHERE_SCALE_RANGE;
     if (meshRef.current) {
       meshRef.current.scale.setScalar(scale);
+      meshRef.current.rotation.y += delta * 0.12;
     }
   });
+
   return (
     <mesh ref={meshRef}>
       <sphereGeometry args={[1, 64, 64]} />
       <meshStandardMaterial
-        color="#c4b5fd"
-        metalness={0.28}
-        roughness={0.38}
+        map={texture}
+        metalness={0.05}
+        roughness={0.85}
       />
     </mesh>
+  );
+}
+
+function EarthSphereFallback({
+  targetSpreadRef,
+}: {
+  targetSpreadRef: React.MutableRefObject<number>;
+}) {
+  const meshRef = useRef<Mesh>(null);
+  const smoothedRef = useRef(DEFAULT_SPREAD);
+  useFrame((_, delta) => {
+    const target = targetSpreadRef.current;
+    smoothedRef.current = lerp(smoothedRef.current, target, SMOOTH_TO_TARGET);
+    const s = smoothedRef.current;
+    const scale = SPHERE_SCALE_MIN + s * SPHERE_SCALE_RANGE;
+    if (meshRef.current) {
+      meshRef.current.scale.setScalar(scale);
+      meshRef.current.rotation.y += delta * 0.12;
+    }
+  });
+  return (
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[1, 48, 48]} />
+      <meshStandardMaterial color="#1e3a5f" roughness={0.9} metalness={0.05} />
+    </mesh>
+  );
+}
+
+function EarthSphereWithSuspense({
+  targetSpreadRef,
+}: {
+  targetSpreadRef: React.MutableRefObject<number>;
+}) {
+  return (
+    <Suspense
+      fallback={<EarthSphereFallback targetSpreadRef={targetSpreadRef} />}
+    >
+      <EarthSphereMesh targetSpreadRef={targetSpreadRef} />
+    </Suspense>
   );
 }
 
@@ -93,7 +182,9 @@ const MSG_CAMERA_INSECURE =
 const MSG_CAMERA_NO_API =
   "Este navegador no expone `getUserMedia` (o no hay contexto seguro). Prueba otro navegador o abre la página en https / localhost.";
 
-async function querySiteCameraPermission(): Promise<"granted" | "denied" | "prompt" | "unknown"> {
+async function querySiteCameraPermission(): Promise<
+  "granted" | "denied" | "prompt" | "unknown"
+> {
   if (typeof navigator === "undefined" || !navigator.permissions?.query) {
     return "unknown";
   }
@@ -120,7 +211,7 @@ function statusMessage(phase: ExperiencePhase, errorText: string): string {
     case "loading":
       return "Solicitando acceso a la cámara y cargando el modelo…";
     case "ready":
-      return "Muestra ambas manos: al alejarlas la esfera crece; al acercarlas, se encoge.";
+      return "Una o dos manos: con dos, separa las manos para crecer; con una, abre el pinch o la palma. La vista muestra solo los puntos trackeados.";
     case "error":
       return errorText || "No se pudo iniciar la experiencia.";
     default: {
@@ -154,14 +245,14 @@ function formatStartError(e: unknown): string {
 
 export function HandSphereExperience() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const overlayHostRef = useRef<HTMLDivElement>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const landmarkerRef = useRef<HandLandmarkerRunning | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const targetSpreadRef = useRef(DEFAULT_SPREAD);
-  /** False after real unmount / Strict Mode teardown; avoids setState on a torn-down instance. */
   const mountedRef = useRef(true);
   const [phase, setPhase] = useState<ExperiencePhase>("idle");
   const [errorText, setErrorText] = useState("");
-  /** Mount WebGL canvas only after ML + camera are ready to avoid losing the GL context to MediaPipe WASM. */
   const [canvasReady, setCanvasReady] = useState(false);
 
   const stopTracks = useCallback(() => {
@@ -209,7 +300,10 @@ export function HandSphereExperience() {
       }
       return;
     }
-    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices?.getUserMedia
+    ) {
       if (mountedRef.current) {
         setPhase("error");
         setErrorText(MSG_CAMERA_NO_API);
@@ -349,11 +443,20 @@ export function HandSphereExperience() {
     }
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
-    if (!video || !landmarker) {
+    const canvas = overlayCanvasRef.current;
+    const host = overlayHostRef.current;
+    if (!video || !landmarker || !canvas || !host) {
       return;
     }
     let cancelled = false;
     let rafId = 0;
+    const onResize = () => {
+      syncCanvasSize(canvas, host);
+    };
+    const ro = new ResizeObserver(onResize);
+    ro.observe(host);
+    onResize();
+
     const tick = () => {
       if (cancelled) {
         return;
@@ -361,15 +464,11 @@ export function HandSphereExperience() {
       if (video.readyState >= 2) {
         const result = landmarker.detectForVideo(video, performance.now());
         const { landmarks } = result;
-        if (landmarks.length >= 2) {
-          const a = landmarks[0][MIDDLE_FINGER_MCP];
-          const b = landmarks[1][MIDDLE_FINGER_MCP];
-          const d = distance2d(a, b);
-          targetSpreadRef.current = normalizeDistance(
-            d,
-            MIN_HAND_SPAN,
-            MAX_HAND_SPAN,
-          );
+        syncCanvasSize(canvas, host);
+        drawLandmarksOnCanvas(canvas, landmarks, true);
+        const spread = computeSpreadFromLandmarks(landmarks);
+        if (spread !== null) {
+          targetSpreadRef.current = spread;
         } else {
           targetSpreadRef.current = lerp(
             targetSpreadRef.current,
@@ -383,6 +482,7 @@ export function HandSphereExperience() {
     rafId = requestAnimationFrame(tick);
     return () => {
       cancelled = true;
+      ro.disconnect();
       cancelAnimationFrame(rafId);
     };
   }, [phase]);
@@ -409,37 +509,46 @@ export function HandSphereExperience() {
               stencil: false,
             }}
           >
-            <color attach="background" args={["#09090b"]} />
-            <ambientLight intensity={0.55} />
-            <directionalLight position={[5, 8, 6]} intensity={1.2} />
-            <directionalLight position={[-4, -2, -2]} intensity={0.3} />
-            <SphereScene targetSpreadRef={targetSpreadRef} />
+            <color attach="background" args={["#030712"]} />
+            <ambientLight intensity={0.6} />
+            <directionalLight position={[5, 8, 6]} intensity={1.15} />
+            <directionalLight position={[-4, -2, -2]} intensity={0.35} />
+            <EarthSphereWithSuspense targetSpreadRef={targetSpreadRef} />
           </Canvas>
         ) : (
           <div className="flex h-full min-h-[200px] w-full flex-col items-center justify-center gap-2 bg-zinc-950 px-4 text-center">
-            <div className="h-24 w-24 rounded-full bg-gradient-to-br from-violet-500/30 to-zinc-800 ring-1 ring-white/10" />
+            <div className="h-24 w-24 rounded-full bg-gradient-to-br from-emerald-500/20 to-zinc-800 ring-1 ring-white/10" />
             <p className="text-xs text-zinc-500">
               {phase === "ready"
                 ? "Preparando visor 3D…"
-                : "La esfera aparecerá al iniciar la cámara."}
+                : "La Tierra en 3D aparecerá al iniciar la cámara."}
             </p>
           </div>
         )}
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative h-36 w-full max-w-xs overflow-hidden rounded-xl bg-zinc-900 ring-1 ring-white/10 sm:h-28">
+        <div
+          ref={overlayHostRef}
+          className="relative h-36 w-full max-w-xs overflow-hidden rounded-xl bg-zinc-950 ring-1 ring-white/10 sm:h-28"
+        >
           <video
             ref={videoRef}
-            className="h-full w-full scale-x-[-1] object-cover"
+            className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
             playsInline
             muted
             width={640}
             height={480}
+            aria-hidden
+          />
+          <canvas
+            ref={overlayCanvasRef}
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            aria-label="Puntos de las manos detectadas"
           />
           {phase !== "ready" ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 text-xs text-zinc-500">
-              {phase === "loading" ? "Iniciando…" : "Vista previa"}
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 text-xs text-zinc-500">
+              {phase === "loading" ? "Iniciando…" : "Vista de puntos"}
             </div>
           ) : null}
         </div>

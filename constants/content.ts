@@ -172,6 +172,6 @@ export const manosPageContent = {
   pageTitle: "Esfera con tus manos",
   titleGradientPart: "manos",
   subtitle:
-    "Dos manos frente a la cámara: al separarlas la esfera crece; al acercarlas, se encoge. Todo el procesamiento es local en tu equipo.",
+    "Una o dos manos: con dos, sepáralas o júntalas; con una, abre el pinch o la palma. La esfera usa textura de la Tierra y el panel muestra solo los puntos trackeados.",
   stackPills: ["Next.js", "MediaPipe Tasks", "Three.js · R3F"] as const,
 } as const;
